@@ -1,6 +1,6 @@
 # S-meandric enumeration
 
-C++20 companion code for the preprint [*S-meandric permutations and tangency polynomials*](http://arxiv.org/). It calculates, for $1\le n\le 24$:
+C++20 companion code for the preprint [*S-meandric permutations and tangency polynomials*](https://arxiv.org/abs/2609.30068). It calculates, for $1\le n\le 24$:
 
 | Number | Counts |
 |---|---|
