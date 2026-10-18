@@ -16,6 +16,7 @@ struct TangencyNumbers {
 // Partitions: 0 selects automatically; otherwise a power of two. Threads: positive.
 std::vector<Count> count_indecomposable(int max_n,
     const std::filesystem::path& scratch, unsigned partitions, unsigned threads);
+// Entries 1 through max_n, for 1 <= max_n <= 45.
 std::vector<TangencyNumbers> count_tangencies(int max_n);
 
 } // namespace meandric

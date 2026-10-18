@@ -3,132 +3,232 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <unordered_set>
+#include <cstring>
+#include <utility>
 #include <vector>
 
 namespace meandric::tangency {
 
-constexpr int max_order = 24;
+// A factorization is 2^(scale-1) times its bridge, loop and cycle factors.
+// Profiles have scale=1. The all-zero value marks an unused hash-table slot.
+// This 32-byte representation holds every profile and signature through n=45.
+struct Factors {
+    std::uint8_t scale = 0, bridges = 0, positive_loops = 0, negative_loops = 0;
+    std::array<std::uint8_t, 28> cycles{}; // Sorted codes 2*length+parity; zero tail.
 
-// Sorted factor codes: 1 is a bridge, 2*l+e is a cycle of length l and parity e.
-// Positive loops (code 2) remain in the profile although their factor is 1.
-using Profile = std::array<std::uint8_t, max_order>;
-using Polynomial = std::array<std::uint32_t, max_order + 1>;
+    bool operator==(const Factors&) const = default;
 
-struct ArrayHash {
-    template <typename T, std::size_t size>
-    std::size_t operator()(const std::array<T, size>& values) const {
-        std::uint64_t hash = 1469598103934665603ULL;
-        for (auto value : values) {
-            hash ^= value;
-            hash *= 1099511628211ULL;
+    void add_cycle(int code) {
+        if (code == 2) { ++positive_loops; return; }
+        if (code == 3) { ++negative_loops; return; }
+        auto end = std::find(cycles.begin(), cycles.end(), 0);
+        auto position = std::upper_bound(cycles.begin(), end, code);
+        std::move_backward(position, end, end + 1);
+        *position = static_cast<std::uint8_t>(code);
+    }
+
+    void remove_cycle(int code) {
+        if (code == 2) { --positive_loops; return; }
+        if (code == 3) { --negative_loops; return; }
+        auto position = std::find(cycles.begin(), cycles.end(), code);
+        std::move(position + 1, cycles.end(), position);
+        cycles.back() = 0;
+    }
+};
+
+// Linear probing avoids a separate allocation for each of millions of keys.
+// Hash collisions are resolved by comparing the complete factorizations.
+class FactorSet {
+public:
+    std::size_t size() const { return entries; }
+
+    bool contains(const Factors& key) const {
+        return slots[find_slot(key)].scale != 0;
+    }
+
+    bool insert(const Factors& key) {
+        auto slot = find_slot(key);
+        if (slots[slot].scale) return false;
+        if (5 * (entries + 1) > 4 * slots.size()) {
+            rehash(2 * slots.size());
+            slot = find_slot(key);
         }
-        return static_cast<std::size_t>(hash);
+        slots[slot] = key;
+        ++entries;
+        return true;
+    }
+
+    void reserve(std::size_t expected) {
+        std::size_t capacity = slots.size();
+        while (5 * expected > 4 * capacity) capacity *= 2;
+        if (capacity > slots.size()) rehash(capacity);
+    }
+
+private:
+    std::vector<Factors> slots = std::vector<Factors>(8);
+    std::size_t entries = 0;
+
+    static std::uint64_t hash(const Factors& key) {
+        std::uint64_t value = 0x9e3779b97f4a7c15ULL;
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&key);
+        for (std::size_t offset = 0; offset < sizeof key; offset += 8) {
+            std::uint64_t word;
+            std::memcpy(&word, bytes + offset, sizeof word);
+            value ^= word;
+            value = (value ^ (value >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            value = (value ^ (value >> 27)) * 0x94d049bb133111ebULL;
+            value ^= value >> 31;
+        }
+        return value;
+    }
+
+    std::size_t find_slot(const Factors& key) const {
+        const auto mask = slots.size() - 1;
+        auto slot = static_cast<std::size_t>(hash(key)) & mask;
+        while (slots[slot].scale && slots[slot] != key)
+            slot = (slot + 1) & mask;
+        return slot;
+    }
+
+    void rehash(std::size_t capacity) {
+        auto previous = std::move(slots);
+        slots = std::vector<Factors>(capacity);
+        for (const auto& key : previous)
+            if (key.scale) slots[find_slot(key)] = key;
     }
 };
 
-using ProfileSet = std::unordered_set<Profile, ArrayHash>;
-using PolynomialSet = std::unordered_set<Polynomial, ArrayHash>;
-
-struct Seed {
-    int order, bridges, cycle_parity; // sum(length + parity) modulo 2 over cycles
-    std::vector<std::uint8_t> cycles;
+// Monomial generators (order, power), sufficient through order 45.
+// Their realizability and the reduction of all other seeds are in ALGORITHM.md.
+inline constexpr std::pair<int, int> monomial_seeds[] = {
+    {5, 3}, {5, 4}, {7, 5}, {8, 4}, {8, 6}, {9, 3}, {11, 3}, {11, 5},
+    {12, 4}, {13, 3}, {14, 4}, {15, 3}, {16, 4}, {17, 3}, {18, 4}, {19, 3},
+    {20, 4}, {21, 3}, {22, 4}, {23, 3}, {24, 4}, {25, 3}, {26, 4}, {27, 3},
+    {28, 4}, {29, 3}, {30, 4}, {31, 3}, {32, 4}, {33, 3}, {34, 4}, {35, 3},
+    {36, 4}, {37, 3}, {38, 4}, {39, 3}, {40, 4}, {41, 3}, {42, 4}, {43, 3},
+    {44, 4}, {45, 3}
 };
 
-// Monomial supports through order 24.
-inline bool allowed_monomial(int n, int k) {
-    return n >= 5 && k >= 3 && k < n
-        && !(n == 6 && k == 4) && !((n == 7 || n == 8) && k == 3)
-        && !(n == 10 && k == 4);
-}
-
-inline Seed monomial_seed(int n, int k) {
-    Seed seed{n, 0, (n + k) % 2, {}};
-    seed.cycles.insert(seed.cycles.end(), n - k, 2);
-    seed.cycles.insert(seed.cycles.end(), k, 3);
-    return seed;
-}
-
-inline int cycle_code(int length, int parity) {
-    return 2 * length + parity;
-}
-
-inline int factor_length(int code) {
-    return code == 1 ? 1 : code / 2;
-}
-
-inline bool insert_seed(const Profile& outer, int position,
-    const Seed& inner, Profile& result) {
-    int code = outer[position], b = inner.bridges;
-    int length = factor_length(code), parity = code % 2, count = 0;
-    for (int i = 0; i < max_order && outer[i]; ++i)
-        if (i != position)
-            result[count++] = outer[i];
-
-    if (code == 1) {
-        for (int i = 0; i < b; ++i)
-            result[count++] = 1;
-    } else if (b > 0) {
-        result[count++] = static_cast<std::uint8_t>(cycle_code(length - 1 + b,
-            parity ^ ((b + 1 + inner.cycle_parity) % 2)));
-    } else if (length > 1) {
-        result[count++] = static_cast<std::uint8_t>(cycle_code(length - 1,
-            parity ^ (1 ^ inner.cycle_parity)));
-    } else if (parity != (1 ^ inner.cycle_parity)) {
-        return false; // The terminal colors disagree at this loop.
-    }
-
-    for (auto cycle : inner.cycles)
-        result[count++] = cycle;
-    std::sort(result.begin(), result.begin() + count);
-    return true;
-}
-
-inline void extend_profiles(std::vector<ProfileSet>& profiles, int n,
-    const std::vector<Seed>& seeds) {
-    const int limit = static_cast<int>(profiles.size()) - 1;
-    for (const auto& profile : profiles[n])
-        for (int i = 0; i < max_order && profile[i]; ++i) {
-            if (i > 0 && profile[i] == profile[i - 1])
-                continue;
-            for (const auto& seed : seeds) {
-                int next_order = n + seed.order - 1;
-                if (next_order > limit)
-                    continue;
-                Profile result{};
-                if (insert_seed(profile, i, seed, result))
-                    profiles[next_order].insert(result);
+// Enumerate each formal profile once: sorted cycles, then the three counts
+// of length-one factors. Positive loops matter for subsequent insertions.
+template<class Visit>
+void all_profiles(int n, Visit visit) {
+    Factors profile;
+    profile.scale = 1;
+    auto enumerate = [&](auto&& self, int remaining, int minimum, int position) -> void {
+        for (int bridges = 0; bridges <= remaining; ++bridges) {
+            profile.bridges = static_cast<std::uint8_t>(bridges);
+            for (int loops = 0; loops <= remaining - bridges; ++loops) {
+                profile.positive_loops = static_cast<std::uint8_t>(loops);
+                profile.negative_loops = static_cast<std::uint8_t>(remaining - bridges - loops);
+                visit(profile);
             }
         }
+        profile.bridges = profile.positive_loops = profile.negative_loops = 0;
+        for (int code = minimum; code <= 2 * remaining + 1; ++code) {
+            profile.cycles[position] = static_cast<std::uint8_t>(code);
+            self(self, remaining - code / 2, code, position + 1);
+            profile.cycles[position] = 0;
+        }
+    };
+    enumerate(enumerate, n, 4, 0);
 }
 
-inline Polynomial polynomial(const Profile& profile) {
-    Polynomial result{};
-    result[0] = 1;
-    int degree = 0;
-    for (auto code : profile) {
+// Earlier levels have been completely classified. A valid predecessor is
+// reachable precisely when it is absent from that level's exception set.
+inline bool has_predecessor(const Factors& child, int n,
+    const std::vector<FactorSet>& excluded) {
+    // Reverse 12: remove a bridge, or shorten a cycle and flip its parity.
+    if (child.bridges >= 2) {
+        auto parent = child;
+        --parent.bridges;
+        if (!excluded[n - 1].contains(parent)) return true;
+    }
+    for (std::size_t i = 0; i < child.cycles.size() && child.cycles[i]; ++i) {
+        int code = child.cycles[i];
+        if (i && code == child.cycles[i - 1]) continue;
+        auto parent = child;
+        parent.remove_cycle(code);
+        parent.add_cycle(2 * (code / 2 - 1) + (1 ^ (code % 2)));
+        if (!excluded[n - 1].contains(parent)) return true;
+    }
+
+    // After removing the inserted 21 or monomial, restore the selected
+    // outer bridge, compatible loop, or cycle that the insertion shortened.
+    auto restore_outer = [&](const Factors& base, int parity, int level) {
+        auto parent = base;
+        ++parent.bridges;
+        if (!excluded[level].contains(parent)) return true;
+        parent = base;
+        parent.add_cycle(3 - parity);
+        if (!excluded[level].contains(parent)) return true;
+
+        auto lengthen = [&](int code) {
+            auto candidate = base;
+            candidate.remove_cycle(code);
+            candidate.add_cycle(2 * (code / 2 + 1) + ((code % 2) ^ 1 ^ parity));
+            return !excluded[level].contains(candidate);
+        };
+        if (base.positive_loops && lengthen(2)) return true;
+        if (base.negative_loops && lengthen(3)) return true;
+        for (std::size_t i = 0; i < base.cycles.size() && base.cycles[i]; ++i)
+            if ((!i || base.cycles[i] != base.cycles[i - 1]) && lengthen(base.cycles[i]))
+                return true;
+        return false;
+    };
+
+    for (auto code : child.cycles) {
+        if (!code || code > 5) break;
+        if (code == 5) {
+            auto base = child;
+            base.remove_cycle(5);
+            if (restore_outer(base, 1, n - 1)) return true;
+            break;
+        }
+    }
+    for (auto [order, power] : monomial_seeds) {
+        if (order > n) break;
+        if (child.positive_loops < order - power || child.negative_loops < power) continue;
+        auto base = child;
+        base.positive_loops -= order - power;
+        base.negative_loops -= power;
+        if (restore_outer(base, (order + power) % 2, n - order + 1)) return true;
+    }
+    return false;
+}
+
+// D_m = E_(m,m-1 mod 2), A_m = E_(m,m mod 2), D_1 = 1, A_1 = x.
+// Repeatedly use D_(2m) = 2 D_m A_m to obtain the unique basis
+// 2, 1+x, odd D_m (m>=3), and A_m (m>=1).
+inline Factors signature(const Factors& profile) {
+    Factors result;
+    result.scale = 1;
+    result.bridges = profile.bridges;
+    result.negative_loops = profile.negative_loops;
+    for (auto code : profile.cycles) {
         if (!code) break;
-        int length = factor_length(code);
-        Polynomial factor{}, product{};
-        if (code == 1) {
-            factor[0] = factor[1] = 1;
+        int length = code / 2;
+        if (code % 2 == length % 2) {
+            result.add_cycle(code);
         } else {
-            std::uint64_t binomial = 1;
-            for (int k = 0; k <= length; ++k) {
-                if (k % 2 == code % 2)
-                    factor[k] = static_cast<std::uint32_t>(binomial);
-                binomial = binomial * (length - k) / (k + 1);
+            while (length % 2 == 0) {
+                length /= 2;
+                ++result.scale;
+                result.add_cycle(2 * length + length % 2);
             }
+            if (length > 1) result.add_cycle(2 * length);
         }
-        for (int i = 0; i <= degree; ++i)
-            if (result[i])
-                for (int j = 0; j <= length; ++j)
-                    product[i + j] += static_cast<std::uint32_t>(
-                        std::uint64_t(result[i]) * factor[j]);
-        result = product;
-        degree += length;
     }
     return result;
+}
+
+inline bool constant_one(const Factors& signature) {
+    if (signature.scale != 1 || signature.negative_loops) return false;
+    for (auto code : signature.cycles) {
+        if (!code) break;
+        if (code % 2) return false;
+    }
+    return true;
 }
 
 } // namespace meandric::tangency

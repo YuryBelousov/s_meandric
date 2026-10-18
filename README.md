@@ -1,6 +1,6 @@
 # S-meandric enumeration
 
-C++20 companion code for the preprint [*S-meandric permutations and tangency polynomials*](https://arxiv.org/abs/2609.30068). It calculates, for $1\le n\le 24$:
+C++20 companion code for the preprint [*S-meandric permutations and tangency polynomials*](https://arxiv.org/abs/2609.30068). It calculates $g_n,s_n$ through order 24 and $N_n,O_n$ through order 45:
 
 | Number | Counts |
 |---|---|
@@ -36,7 +36,7 @@ The full command is `meandric n [scratch [partitions [threads]]]`.
 - `scratch`: Directory for temporary working files. The program stores intermediate enumeration states there to limit RAM use and deletes files when they are no longer needed. Default: `scratch` in the current directory. Use a dedicated empty directory for each run; for large orders, place it on a local SSD outside synchronized folders.
 - `partitions`: Number of parts processed separately at each enumeration step. More partitions reduce RAM use but require repeated scans of the intermediate data. Default: `0`, which automatically chooses between 1 and 32 partitions. For a fixed number, use a positive power of two: `1`, `2`, `4`, `8`, etc.
 - `threads`: Number of parallel worker threads. Default: all hardware threads. Use a positive integer; `1` runs serially. Workers share the state tables, so adding threads does not multiply their memory use.
-- `--polynomials`: Use after `n`, in place of the remaining parameters, to calculate only $N_n$ and $O_n$. For example: `./build/meandric 24 --polynomials`.
+- `--polynomials`: Use after `n`, in place of the remaining parameters, to calculate only $N_n$ and $O_n$, for `n` up to 45. For example: `./build/meandric 45 --polynomials > tangency_numbers.csv`.
 
 Layer progress goes to standard error; redirect standard output to save the CSV.
 
@@ -65,6 +65,6 @@ Start with [Source files/main.cpp](<Source files/main.cpp>).
 | [Source files/frontier.hpp](<Source files/frontier.hpp>) | Frontier state and vertex transitions for $g_n$ |
 | [Source files/state_storage.hpp](<Source files/state_storage.hpp>) | Packed state keys and compact hash tables |
 | [Source files/permutations.cpp](<Source files/permutations.cpp>) | Disk layers and shared partition tables |
-| [Source files/tangency_profiles.hpp](<Source files/tangency_profiles.hpp>) | Signed-factor insertion and polynomial expansion |
+| [Source files/tangency_profiles.hpp](<Source files/tangency_profiles.hpp>) | Inverse insertion and exact polynomial signatures |
 | [Source files/tangencies.cpp](<Source files/tangencies.cpp>) | Enumeration of $N_n,O_n$ |
 | [Source files/numbers.hpp](<Source files/numbers.hpp>) | Count types and function declarations |

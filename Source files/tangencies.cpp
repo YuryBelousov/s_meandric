@@ -5,26 +5,23 @@ namespace meandric {
 
 std::vector<TangencyNumbers> count_tangencies(int max_n) {
     using namespace tangency;
-    std::vector<Seed> seeds{{2, 2, 0, {}}, {2, 0, 1, {5}}};
-    for (int n = 5; n <= max_n; ++n)
-        for (int k = 3; k < n; ++k)
-            if (allowed_monomial(n, k))
-                seeds.push_back(monomial_seed(n, k));
-
-    std::vector<ProfileSet> profiles(max_n + 1);
-    profiles[1].insert(Profile{1});
+    std::vector<FactorSet> excluded(max_n + 1);
     std::vector<TangencyNumbers> numbers(max_n + 1);
     for (int n = 1; n <= max_n; ++n) {
-        PolynomialSet polynomials;
-        for (const auto& profile : profiles[n])
-            polynomials.insert(polynomial(profile));
+        FactorSet polynomials;
+        polynomials.reserve(8 * numbers[n - 1].N / 5 + 8);
+        excluded[n].reserve(3 * excluded[n - 1].size() / 2 + 8);
+        all_profiles(n, [&](const Factors& profile) {
+            bool reachable = n == 1 ? profile.bridges == 1
+                : has_predecessor(profile, n, excluded);
+            if (!reachable) {
+                excluded[n].insert(profile);
+                return;
+            }
+            auto key = signature(profile);
+            if (polynomials.insert(key) && constant_one(key)) ++numbers[n].O;
+        });
         numbers[n].N = polynomials.size();
-        for (const auto& coefficients : polynomials)
-            if (coefficients[0] == 1)
-                ++numbers[n].O;
-
-        extend_profiles(profiles, n, seeds);
-        ProfileSet().swap(profiles[n]);
     }
     return numbers;
 }

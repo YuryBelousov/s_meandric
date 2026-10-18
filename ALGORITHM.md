@@ -55,7 +55,7 @@ A profile is the sorted multiset of signed cactus factors in the paper's Theorem
 
 $$E_{l,e}(x)=\sum_{j\equiv e\pmod2}\binom ljx^j.$$
 
-Code `1` denotes a bridge and `2*l+e` a cycle; trailing zeros are unused. Positive loops have code `2`. Their polynomial is one, but they must remain in the profile because they affect later insertions. Factor lengths sum to the permutation order.
+The representation stores the numbers of bridges and of each loop type, followed by the sorted codes `2*l+e` of cycles of length at least two. Positive loops have polynomial one, but remain in the profile because they affect later insertions. Factor lengths sum to the permutation order.
 
 ### Insertion rule
 
@@ -76,10 +76,66 @@ with $E_{0,0}=1$ and $E_{0,1}=0$. Removing a marked edge from an outer cycle giv
 
 ### Seeds and completeness
 
-The binary snake seeds are $12$ (two bridges) and $21$ (one odd 2-cycle). A monomial seed $x^k$ at order $r$ has $r-k$ positive loops and $k$ negative loops. Through order 24, the possible monomial pairs are $5\le r\le24$, $3\le k<r$, except $(6,4),(7,3),(8,3),(10,4)$.
+The binary snake seeds are $12$ (two bridges) and $21$ (one odd 2-cycle). A monomial seed $x^k$ at order $r$ has $r-k$ positive loops and $k$ negative loops. Through order 45, the possible monomial pairs are $5\le r\le45$, $3\le k<r$, except $(6,4),(7,3),(8,3),(10,4)$.
 
 Completeness uses the prime-factorization theorem: every singular meander is obtained by insertions of snakes and irreducibles. See Y. Belousov, [*Prime factorization of meanders*](https://arxiv.org/abs/2112.10289), Theorem 3 and Proposition 2. Common intervals identify submeanders, so an irreducible permutation is simple. Disconnected interlacement components would give a proper common interval; therefore an irreducible has connected interlacement graph and a monomial profile. This component-interval correspondence follows from Theorem 2 of Bergeron, Heber, and Stoye, [*Common intervals and sorting by reversals*](https://academic.oup.com/bioinformatics/article/18/suppl_2/S54/190353), applied to the signed inverse permutation. Give value $i$ in the inverse a positive sign when $(\pi(i-1),\pi(i),\pi(i+1))$ has even relative order, and a negative sign otherwise; here $\pi(0)=0$ and $\pi(r+1)=r+1$. These signs prevent overlaps at shared endpoints.
 
 An irreducible has at least three touches and cannot have only touches, giving $3\le k<r$. Binary snakes generate all larger snakes. Thus the seeds cover every prime factor, and the insertion rule generates every realizable profile. Conversely, inserting realizable seeds produces realizable profiles.
 
-At each order, expand all profiles and deduplicate their coefficient vectors. The number of vectors is $N_n$; those with constant coefficient one give $O_n$. The coefficient sum is at most $2^{24}$, so 32-bit coefficients suffice; multiplication uses 64 bits.
+Only 42 monomial generators are needed: $(5,3),(5,4),(7,5),(8,4),(8,6),(9,3),(11,5)$, together with $(r,3)$ for odd $11\le r\le45$ and $(r,4)$ for even $12\le r\le44$. The two insertion constructions
+
+$$ (r,k)\longmapsto(r+1,k+((r+k)\bmod2)), $$
+$$ (r,k),(s,j)\longmapsto(r+s-1,k+j-e),\qquad e=1-((s+j)\bmod2) $$
+
+generate all 898 allowed pairs through order 45. The first inserts into $21$; the second inserts into an outer loop of parity $e$, which must be present. Each dependency has smaller order. Thus every omitted seed can be replaced by nested insertions of the retained generators.
+
+All 42 generators have positive irreducible counts $I_{m,k}$, where $m=r-k$ is the number of transverse crossings. The required entries from the complexity-49 enumeration ($m+2k\le49$) are reproduced below; a dash denotes an entry not needed here. Source: `irreducibles_49.csv`, SHA-256 `c844fd6c1179c9c534b11fba64538dacb0ffb6194dc65775865d14fc1cc501f2`.
+
+| $m$ | $I_{m,3}$ | $I_{m,4}$ | $I_{m,5}$ | $I_{m,6}$ |
+|---:|---:|---:|---:|---:|
+| 1 | — | 2 | — | — |
+| 2 | 2 | — | 12 | 14 |
+| 4 | — | 10 | — | — |
+| 6 | 4 | — | 180 | — |
+| 8 | 2 | 50 | — | — |
+| 10 | 4 | 40 | — | — |
+| 12 | 2 | 120 | — | — |
+| 14 | 8 | 100 | — | — |
+| 16 | 2 | 270 | — | — |
+| 18 | 10 | 190 | — | — |
+| 20 | 4 | 560 | — | — |
+| 22 | 6 | 390 | — | — |
+| 24 | 6 | 840 | — | — |
+| 26 | 14 | 580 | — | — |
+| 28 | 4 | 1300 | — | — |
+| 30 | 16 | 990 | — | — |
+| 32 | 6 | 1990 | — | — |
+| 34 | 10 | 1390 | — | — |
+| 36 | 8 | 2700 | — | — |
+| 38 | 20 | 1860 | — | — |
+| 40 | 6 | 3790 | — | — |
+| 42 | 18 | — | — | — |
+
+The supported range is $1\le n\le45$. Extending it requires additional monomial realizations: the first missing certificate is for $(46,4)$.
+
+### Inverse enumeration
+
+At each order enumerate all formal profiles, choosing a sorted multiset of cycles of length at least two and distributing the remaining order among bridges and the two loop types. A profile is realizable exactly when reversing some generator insertion produces a realizable profile of smaller order. At order one, only the single bridge is realizable.
+
+For $12$, reversal removes one of at least two bridges, or shortens a cycle and flips its parity. For $21$ or a monomial, remove its factors, then restore the selected outer bridge, compatible loop, or shortened cycle according to the insertion table. Earlier orders have already been completely classified, so membership is exact.
+
+Almost all formal profiles are realizable at large orders. Store only the excluded profiles of previous orders; absence from the appropriate set then means realizability. Polynomial signatures are deduplicated in a separate set for the current order, which is discarded after counting. Both sets use 32-byte keys and linear probing at up to 80% occupancy, with complete-key comparison to resolve hash collisions.
+
+### Exact polynomial signatures
+
+Put $D_m=E_{m,(m-1)\bmod2}$ and $A_m=E_{m,m\bmod2}$, so $D_1=1$ and $A_1=x$. Repeated application of $D_{2m}=2D_mA_m$ gives
+
+$$ D_{2^a r}=2^aD_r\prod_{j=0}^{a-1}A_{2^jr}\qquad(r\text{ odd}). $$
+
+Normalize each profile to
+
+$$ 2^s(1+x)^B\prod_{\substack{r\ge3\\r\text{ odd}}}D_r^{\alpha_r}\prod_{m\ge1}A_m^{\beta_m}. $$
+
+This representation is unique. Under the substitution $u=-(1+x)/(1-x)$, the odd $D_r$ have numerators $1+u+\cdots+u^{r-1}$, while the $A_m$ have numerators $u^m+1$. Their cyclotomic factors have odd and even indices, respectively. In each family, descending from the largest index in a multiplicative relation determines all exponents. The root at $x=-1$ determines $B$, and the remaining scalar determines $s$.
+
+The signature uses the same factor representation, with positive loops removed and `scale=s+1`. Thus distinct signatures count $N_n$ without expanding coefficients. A signature has constant coefficient one exactly when $s=0$, $\beta_1=0$, and every remaining cycle factor has even parity; these signatures count $O_n$.
