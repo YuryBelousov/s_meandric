@@ -56,6 +56,8 @@ The table below shows measurements for a full run through order 24 on an AMD Ryz
 
 The output from this run is in [s_meandric_numbers.csv](s_meandric_numbers.csv).
 
+Tangency polynomial counts through order 45 are in [tangency_numbers.csv](tangency_numbers.csv).
+
 ## Reading the code
 
 Start with [Source files/main.cpp](<Source files/main.cpp>).
